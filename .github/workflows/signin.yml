@@ -2,13 +2,11 @@ name: KuroBBS Auto SignIn
 
 on:
   schedule:
-    # 每天上午 9:30 执行
     - cron: '0 16 * * *'
   workflow_dispatch:
-    # 支持手动触发，可传入参数
     inputs:
       debug:
-        description: 'Debug mode'
+        description: '启用调试模式'
         required: false
         default: false
         type: boolean
@@ -18,36 +16,32 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
+      - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: Setup Python
+      - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       
-      - name: Install dependencies
+      - name: 安装依赖
         run: |
           pip install --upgrade pip
-          
-          # 确保所有依赖都安装
           pip install pyyaml requests pytz httpx
+          if [ -f "pyproject.toml" ]; then
+            pip install -e .
+          fi
       
-      - name: Create config directory
-        run: mkdir -p config
+      - name: 创建配置目录
+        run: mkdir -p config log
       
-      - name: Create user config
+      - name: 创建用户配置文件
         env:
           USER_NAME: ${{ secrets.USER_NAME }}
           USER_TOKEN: ${{ secrets.USER_TOKEN }}
           AUTO_REPLENISH: ${{ secrets.AUTO_REPLENISH || 'true' }}
           RETRY_TIMES: ${{ secrets.RETRY_TIMES || '3' }}
         run: |
-          if [ -z "$USER_NAME" ] || [ -z "$USER_TOKEN" ]; then
-            echo "错误: USER_NAME 和 USER_TOKEN 必须设置"
-            exit 1
-          fi
-          
           cat > config/${USER_NAME}.yaml << EOF
           enable: true
           token: ${USER_TOKEN}
@@ -64,47 +58,72 @@ jobs:
           EOF
           
           echo "用户配置文件已创建: config/${USER_NAME}.yaml"
-          cat config/${USER_NAME}.yaml
       
-      - name: Create push config (if enabled)
+      - name: 创建多用户配置文件
+        env:
+          USERS_JSON: ${{ secrets.USERS_JSON }}
+        run: |
+          if [ -n "$USERS_JSON" ]; then
+            echo '$USERS_JSON' | jq -c '.[]' 2>/dev/null | while read -r user; do
+              username=$(echo "$user" | jq -r '.username')
+              token=$(echo "$user" | jq -r '.token')
+              auto_replenish=$(echo "$user" | jq -r '.auto_replenish // "true"')
+              retry_times=$(echo "$user" | jq -r '.retry_times // "3"')
+              
+              cat > "config/${username}.yaml" << EOF
+              enable: true
+              token: ${token}
+              completed: false
+              auto_reple_sign: ${auto_replenish}
+              retry_times: ${retry_times}
+              game_info:
+                distinct_id: ""
+                devcode: ""
+                wwroleId: ""
+                eeeroleId: ""
+              user_info:
+                userId: ""
+              EOF
+              echo "已创建: config/${username}.yaml"
+            done
+          fi
+      
+      - name: 创建 Qmsg 推送配置文件
         env:
           PUSH_ENABLE: ${{ secrets.PUSH_ENABLE }}
           PUSH_LEVEL: ${{ secrets.PUSH_LEVEL || '1' }}
-          PUSH_SERVER: ${{ secrets.PUSH_SERVER }}
-          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
-        if: env.PUSH_ENABLE == 'true' && env.PUSH_SERVER != ''
+          QMSG_KEY: ${{ secrets.QMSG_KEY }}
         run: |
-          cat > config/push.ini << 'INI'
-          [setting]
-          enable = true
-          push_level = ${PUSH_LEVEL}
-          push_server = ${PUSH_SERVER}
-          push_block_keys =
-          
-          [${PUSH_SERVER}]
-          token=${PUSH_TOKEN}
-          INI
-          
-          # 替换变量
-          sed -i "s/\${PUSH_LEVEL}/${PUSH_LEVEL}/g" config/push.ini
-          sed -i "s/\${PUSH_SERVER}/${PUSH_SERVER}/g" config/push.ini
-          sed -i "s/\${PUSH_TOKEN}/${PUSH_TOKEN}/g" config/push.ini
-          
-          # 如果是 pushplus，不需要额外配置
-          if [ "${PUSH_SERVER}" = "pushplus" ]; then
-            echo "pushplus 配置完成"
+          if [ "$PUSH_ENABLE" = "true" ] && [ -n "$QMSG_KEY" ]; then
+            cat > config/push.ini << EOF
+            [setting]
+            enable = true
+            push_level = ${PUSH_LEVEL}
+            push_server = qmsg
+            push_block_keys =
+            
+            [qmsg]
+            key = ${QMSG_KEY}
+            EOF
+            echo "Qmsg 推送配置文件已创建"
+          else
+            echo "推送未启用或 QMSG_KEY 未设置，跳过创建 push.ini"
           fi
-          
-          echo "推送配置文件已创建"
-          cat config/push.ini
       
-      - name: List config files
+      - name: 调试 - 查看配置文件
+        if: github.event.inputs.debug == 'true'
         run: |
-          echo "=== Config directory contents ==="
+          echo "=== 配置文件列表 ==="
           ls -la config/
-          echo "================================"
+          echo "=== push.ini 内容 ==="
+          cat config/push.ini 2>/dev/null || echo "push.ini 不存在"
+          echo "=== 用户配置内容（隐藏token）==="
+          for f in config/*.yaml; do
+            echo "--- $f ---"
+            grep -v "token:" "$f" 2>/dev/null || cat "$f"
+          done
       
-      - name: Run signin script
+      - name: 执行签到
         run: |
           if [ "${{ github.event.inputs.debug }}" = "true" ]; then
             python main.py --debug
@@ -112,7 +131,7 @@ jobs:
             python main.py
           fi
       
-      - name: Upload logs
+      - name: 上传日志
         if: always()
         uses: actions/upload-artifact@v4
         with:
