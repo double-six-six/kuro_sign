@@ -2,7 +2,7 @@ name: KuroBBS Auto SignIn
 
 on:
   schedule:
-    - cron: '30 1 * * *'  # 北京时间 9:30
+    - cron: '0 16 * * *'  # 北京时间 9:30
   workflow_dispatch:
 
 jobs:
