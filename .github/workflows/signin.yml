@@ -1,14 +1,17 @@
 name: KuroBBS Auto SignIn
 
 on:
+  # 定时触发 - 北京时间每天 09:30 执行（UTC 01:30）
   schedule:
-    - cron: '30 1 * * *'
+    - cron: '0 16 * * *'
+  # 手动触发
   workflow_dispatch:
 
 jobs:
   signin:
     runs-on: ubuntu-latest
     
+    # 设置时区为北京时间
     env:
       TZ: Asia/Shanghai
     
@@ -23,6 +26,7 @@ jobs:
       
       - name: Install dependencies
         run: |
+          pip install --upgrade pip
           pip install pyyaml requests pytz httpx
       
       - name: Create config directory
@@ -35,7 +39,7 @@ jobs:
           KURO_USERNAME: ${{ secrets.KURO_USERNAME }}
           AUTO_REPLENISH: ${{ secrets.AUTO_REPLENISH || 'true' }}
         run: |
-          cat > config/${KURO_USERNAME}.yaml << EOF
+          cat > config/${KURO_USERNAME}.yaml << 'EOF'
           enable: true
           token: ${KURO_TOKEN}
           completed: false
@@ -44,6 +48,7 @@ jobs:
           game_info: {}
           user_info: {}
           EOF
+          echo "✅ 用户配置文件已创建: config/${KURO_USERNAME}.yaml"
       
       - name: Create push config
         env:
@@ -52,29 +57,58 @@ jobs:
           PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
           PUSH_LEVEL: ${{ secrets.PUSH_LEVEL || '2' }}
         run: |
-          if [ "${PUSH_ENABLE}" = "true" ] && [ -n "${PUSH_SERVER}" ] && [ -n "${PUSH_TOKEN}" ]; then
-            cat > config/push.ini << EOF
-            [setting]
-            enable = true
-            push_level = ${PUSH_LEVEL}
-            push_server = ${PUSH_SERVER}
-            
-            [${PUSH_SERVER}]
-            push_token = ${PUSH_TOKEN}
-            EOF
-            echo "✅ 推送配置文件已创建"
-            cat config/push.ini
-          else
-            echo "⚠️ 推送未启用或配置不完整，跳过"
+          # 检查是否启用推送
+          if [ "${PUSH_ENABLE}" != "true" ]; then
+            echo "⚠️ 推送未启用，跳过创建推送配置"
+            exit 0
           fi
+          
+          # 检查必要参数
+          if [ -z "${PUSH_SERVER}" ]; then
+            echo "⚠️ PUSH_SERVER 未设置，跳过创建推送配置"
+            exit 0
+          fi
+          
+          if [ -z "${PUSH_TOKEN}" ]; then
+            echo "⚠️ PUSH_TOKEN 未设置，跳过创建推送配置"
+            exit 0
+          fi
+          
+          # 创建推送配置文件
+          echo "[setting]" > config/push.ini
+          echo "enable = true" >> config/push.ini
+          echo "push_level = ${PUSH_LEVEL}" >> config/push.ini
+          echo "push_server = ${PUSH_SERVER}" >> config/push.ini
+          echo "" >> config/push.ini
+          echo "[${PUSH_SERVER}]" >> config/push.ini
+          echo "push_token = ${PUSH_TOKEN}" >> config/push.ini
+          
+          # 如果是 Telegram，添加额外配置
+          if [ "${PUSH_SERVER}" = "telegram" ]; then
+            echo "chat_id = ${PUSH_CHAT_ID}" >> config/push.ini
+            echo "api_url = api.telegram.org" >> config/push.ini
+          fi
+          
+          echo "✅ 推送配置文件已创建"
+          echo "--- 配置文件内容 ---"
+          cat config/push.ini
       
       - name: Run signin script
-        run: python main.py
+        run: |
+          echo "开始执行签到任务..."
+          python main.py
+          echo "签到任务执行完成"
       
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: signin-logs
+          name: signin-logs-${{ github.run_id }}
           path: log/
           retention-days: 7
+      
+      - name: Clean old logs
+        if: always()
+        run: |
+          # 保留最近7天的日志
+          find log/ -name "*.log" -mtime +7 -delete 2>/dev/null || true
