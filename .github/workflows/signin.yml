@@ -82,7 +82,7 @@ jobs:
           push_block_keys =
           
           [${PUSH_SERVER}]
-          token = ${PUSH_TOKEN}
+          token=${PUSH_TOKEN}
           INI
           
           # 替换变量
