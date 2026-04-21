@@ -2,7 +2,7 @@ name: KuroBBS Auto SignIn
 
 on:
   schedule:
-    - cron: '0 16 * * *'  # 北京时间 9:30
+    - cron: '0 16 * * *'
   workflow_dispatch:
 
 jobs:
@@ -45,8 +45,9 @@ jobs:
           user_info: {}
           EOF
       
+      # 这里是第50行附近 - 修正后的推送配置步骤
       - name: Create push config for Server酱
-        if: secrets.PUSH_ENABLE == 'true'
+        if: ${{ secrets.PUSH_ENABLE == 'true' }}
         env:
           PUSH_SERVER: ${{ secrets.PUSH_SERVER }}
           PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
@@ -62,6 +63,7 @@ jobs:
           push_token = ${PUSH_TOKEN}
           EOF
           echo "推送配置文件已创建"
+          cat config/push.ini  # 调试：显示配置文件内容
       
       - name: Run signin script
         run: python main.py
