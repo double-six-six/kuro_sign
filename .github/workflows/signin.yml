@@ -2,7 +2,7 @@ name: KuroBBS Auto SignIn
 
 on:
   schedule:
-    - cron: '0 16 * * *'
+    - cron: '30 1 * * *'
   workflow_dispatch:
 
 jobs:
@@ -45,25 +45,28 @@ jobs:
           user_info: {}
           EOF
       
-      # 这里是第50行附近 - 修正后的推送配置步骤
-      - name: Create push config for Server酱
-        if: ${{ secrets.PUSH_ENABLE == 'true' }}
+      - name: Create push config
         env:
+          PUSH_ENABLE: ${{ secrets.PUSH_ENABLE }}
           PUSH_SERVER: ${{ secrets.PUSH_SERVER }}
           PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
           PUSH_LEVEL: ${{ secrets.PUSH_LEVEL || '2' }}
         run: |
-          cat > config/push.ini << EOF
-          [setting]
-          enable = true
-          push_level = ${PUSH_LEVEL}
-          push_server = ${PUSH_SERVER}
-          
-          [${PUSH_SERVER}]
-          push_token = ${PUSH_TOKEN}
-          EOF
-          echo "推送配置文件已创建"
-          cat config/push.ini  # 调试：显示配置文件内容
+          if [ "${PUSH_ENABLE}" = "true" ] && [ -n "${PUSH_SERVER}" ] && [ -n "${PUSH_TOKEN}" ]; then
+            cat > config/push.ini << EOF
+            [setting]
+            enable = true
+            push_level = ${PUSH_LEVEL}
+            push_server = ${PUSH_SERVER}
+            
+            [${PUSH_SERVER}]
+            push_token = ${PUSH_TOKEN}
+            EOF
+            echo "✅ 推送配置文件已创建"
+            cat config/push.ini
+          else
+            echo "⚠️ 推送未启用或配置不完整，跳过"
+          fi
       
       - name: Run signin script
         run: python main.py
